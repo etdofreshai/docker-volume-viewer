@@ -76,11 +76,24 @@ app.get('/styles.css', async c => new Response(await fs.readFile(path.join(PUBLI
 app.onError((err,c) => c.json({ error: err.message || 'internal error' }, 500));
 
 export function stripDockerLogHeaders(input: Buffer | string): string { const raw = Buffer.isBuffer(input) ? input : Buffer.from(input); let out=''; for(let i=0;i<raw.length;){ if(i+8<=raw.length && [0,1,2].includes(raw[i])) { const len=raw.readUInt32BE(i+4); if(len>=0 && i+8+len<=raw.length){ out += raw.subarray(i+8,i+8+len).toString('utf8'); i += 8+len; continue; } } out += raw.subarray(i).toString('utf8'); break;} return out; }
-type TarEntry={name:string; type:'file'|'directory'|'symlink'|'other'; size?:number; mode?:number; mtime?:Date; content?:Buffer};
+export type TarEntry={name:string; type:'file'|'directory'|'symlink'|'other'; size?:number; mode?:number; mtime?:Date; content?:Buffer};
 function normalizeTarName(n:string){ return n.replace(/^\.\/?/,'').replace(/\/$/,''); }
 function entryType(t:string): TarEntry['type'] { return t==='directory'?'directory':t==='file'?'file':t==='symlink'?'symlink':'other'; }
-async function extractArchive(stream: NodeJS.ReadableStream, includeContent=false): Promise<TarEntry[]> { const extract=tar.extract(); const entries:TarEntry[]=[]; return await new Promise((resolve,reject)=>{ extract.on('entry',(header,s,next)=>{ const chunks:Buffer[]=[]; s.on('data',d=> includeContent && chunks.push(Buffer.from(d))); s.on('end',()=>{ entries.push({ name:path.basename(normalizeTarName(header.name || '')), type:entryType(header.type || 'file'), size:header.size, mode:header.mode, mtime:header.mtime, content: includeContent?Buffer.concat(chunks):undefined }); next(); }); s.resume(); }); extract.on('finish',()=>resolve(entries)); extract.on('error',reject); Readable.from(stream as any).pipe(extract).on('error',reject); }); }
-async function getContainerPathEntries(id:string, p:string): Promise<TarEntry[]> { const stream = await docker.getContainer(id).getArchive({ path:p }); return extractArchive(stream, false); }
+export function directArchiveChildren(entries: TarEntry[]): TarEntry[] {
+  const byName = new Map<string,TarEntry>();
+  for (const e of entries) {
+    const normalized = normalizeTarName(e.name);
+    if (!normalized || normalized === '.') continue;
+    const first = normalized.split('/')[0];
+    const isNested = normalized.includes('/');
+    const existing = byName.get(first);
+    if (!existing) byName.set(first, { ...e, name:first, type:isNested?'directory':e.type, content:undefined });
+    else if (existing.type !== 'directory' && isNested) byName.set(first, { ...existing, type:'directory', content:undefined });
+  }
+  return [...byName.values()];
+}
+async function extractArchive(stream: NodeJS.ReadableStream, includeContent=false): Promise<TarEntry[]> { const extract=tar.extract(); const entries:TarEntry[]=[]; return await new Promise((resolve,reject)=>{ extract.on('entry',(header,s,next)=>{ const chunks:Buffer[]=[]; s.on('data',d=> includeContent && chunks.push(Buffer.from(d))); s.on('end',()=>{ entries.push({ name:normalizeTarName(header.name || ''), type:entryType(header.type || 'file'), size:header.size, mode:header.mode, mtime:header.mtime, content: includeContent?Buffer.concat(chunks):undefined }); next(); }); s.resume(); }); extract.on('finish',()=>resolve(entries)); extract.on('error',reject); Readable.from(stream as any).pipe(extract).on('error',reject); }); }
+async function getContainerPathEntries(id:string, p:string): Promise<TarEntry[]> { const stream = await docker.getContainer(id).getArchive({ path:p }); return directArchiveChildren(await extractArchive(stream, false)); }
 async function getSingleContainerFile(id:string, p:string): Promise<TarEntry | undefined> { const stream = await docker.getContainer(id).getArchive({ path:p }); return (await extractArchive(stream, true))[0]; }
 function sortEntries(a:any,b:any){ if(a.type!==b.type) return a.type==='directory'?-1:1; return a.name.localeCompare(b.name); }
 function isLikelyText(buf:Buffer,mime:string){ if(mime.startsWith('text/') || ['application/json','application/xml','application/javascript'].includes(mime)) return true; return !buf.subarray(0,2048).includes(0); }
