@@ -11,3 +11,13 @@ test('directArchiveChildren collapses recursive Docker archive entries to one di
   ];
   assert.deepEqual(directArchiveChildren(entries).map(e => [e.name, e.type]), [['foo','directory'], ['alpha.txt','file']]);
 });
+
+test('directArchiveChildren strips Docker archive root directory prefix', () => {
+  const entries: TarEntry[] = [
+    { name: 'node', type: 'directory' },
+    { name: 'node/.ccrc', type: 'directory' },
+    { name: 'node/.ccrc/agents.json', type: 'file', size: 10 },
+    { name: 'node/.claude', type: 'directory' },
+  ];
+  assert.deepEqual(directArchiveChildren(entries).map(e => [e.name, e.type]), [['.ccrc','directory'], ['.claude','directory']]);
+});

@@ -80,10 +80,16 @@ export type TarEntry={name:string; type:'file'|'directory'|'symlink'|'other'; si
 function normalizeTarName(n:string){ return n.replace(/^\.\/?/,'').replace(/\/$/,''); }
 function entryType(t:string): TarEntry['type'] { return t==='directory'?'directory':t==='file'?'file':t==='symlink'?'symlink':'other'; }
 export function directArchiveChildren(entries: TarEntry[]): TarEntry[] {
+  const normalizedEntries = entries.map(e => ({ ...e, name: normalizeTarName(e.name) })).filter(e => e.name && e.name !== '.');
+  const firstEntry = normalizedEntries[0];
+  const rootPrefix = firstEntry?.type === 'directory' ? firstEntry.name.split('/')[0] : undefined;
   const byName = new Map<string,TarEntry>();
-  for (const e of entries) {
-    const normalized = normalizeTarName(e.name);
-    if (!normalized || normalized === '.') continue;
+  for (const e of normalizedEntries) {
+    let normalized = e.name;
+    if (rootPrefix && (normalized === rootPrefix || normalized.startsWith(rootPrefix + '/'))) {
+      normalized = normalized.slice(rootPrefix.length).replace(/^\//, '');
+    }
+    if (!normalized) continue;
     const first = normalized.split('/')[0];
     const isNested = normalized.includes('/');
     const existing = byName.get(first);
