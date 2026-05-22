@@ -82,7 +82,8 @@ function entryType(t:string): TarEntry['type'] { return t==='directory'?'directo
 export function directArchiveChildren(entries: TarEntry[]): TarEntry[] {
   const normalizedEntries = entries.map(e => ({ ...e, name: normalizeTarName(e.name) })).filter(e => e.name && e.name !== '.');
   const firstEntry = normalizedEntries[0];
-  const rootPrefix = firstEntry?.type === 'directory' ? firstEntry.name.split('/')[0] : undefined;
+  const candidateRoot = firstEntry?.type === 'directory' ? firstEntry.name.split('/')[0] : undefined;
+  const rootPrefix = candidateRoot && normalizedEntries.every(e => e.name === candidateRoot || e.name.startsWith(candidateRoot + '/')) ? candidateRoot : undefined;
   const byName = new Map<string,TarEntry>();
   for (const e of normalizedEntries) {
     let normalized = e.name;
